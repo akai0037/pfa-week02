@@ -1,7 +1,8 @@
 """
 cloud_controller_v7.py  --  Maya Python scripting, example #7
 
-Now it's a GAME. You have GAME_SECONDS (90) to grow as many flowers as you can.
+Now it's a GAME. You have a time limit (90 seconds to start with; change it with the
+"Game time" slider) to grow as many flowers as you can.
 
     * Press "Start Game". A countdown runs across the top of the window.
     * Every flower that finishes growing is COLLECTED: it scores one point, and the
@@ -27,7 +28,7 @@ New concepts compared to example #6:
     - Game states ("ready", "playing", "over") that decide which parts of the live
       update are allowed to run. Freezing the garden is just "skip the update".
     - A countdown timer, and capping the last time step so a round lasts exactly
-      GAME_SECONDS.
+      as long as the "Game time" slider said when the round started.
     - A score that counts an event once (a flag on each flower stops double counting).
     - A banner whose text and colour change with the game state.
     - ONE-STEP UNDO: everything a button click builds is wrapped in an undo chunk,
@@ -160,9 +161,11 @@ TICK_MIN_DT = 0.04                 # ignore updates closer together than this (s
 TICK_MAX_DT = 0.25                 # cap huge jumps (e.g. after a slow redraw)
 
 # --- The game ---
-GAME_SECONDS = 90.0                # length of one round
+GAME_SECONDS = 90.0                # starting value of the "Game time" slider (seconds per round)
+MIN_GAME_SECONDS = 10.0            # the slider's range
+MAX_GAME_SECONDS = 300.0
 WARN_SECONDS = 30.0                # the banner turns orange when this much time is left...
-DANGER_SECONDS = 10.0              # ...and red when this much is left
+DANGER_SECONDS = 10.0              # ...and red when this much is left (both shrink for short rounds)
 BANNER_COLORS = {
     "ready":   (0.25, 0.35, 0.50),
     "playing": (0.20, 0.50, 0.25),
@@ -177,6 +180,7 @@ SLIDER_Z = "cloudSliderZ"
 STEP_SLIDER = "cloudStepSlider"
 GROW_SLIDER = "cloudGrowSlider"
 WITHER_SLIDER = "cloudWitherSlider"
+GAME_SLIDER = "cloudGameSlider"
 STATUS_TEXT = "cloudStatusText"
 NEEDS_TEXT = "cloudNeedsText"
 LIFE_TEXT = "cloudLifeText"
@@ -195,6 +199,7 @@ TIME_BAR = "cloudTimeBar"
 STATE = {
     "phase": "ready",    # "ready" (before the game), "playing", or "over" (time is up)
     "score": 0,          # flowers collected this round
+    "game_seconds": GAME_SECONDS,   # length of the current / next round (from the slider)
     "time_left": GAME_SECONDS,   # seconds left in this round
     "banner": None,      # last banner (text, colour, percent) we showed
     "raining": False,
@@ -638,7 +643,8 @@ def create_scene():
     STATE["next_index"] = 1
     STATE["died"] = 0
     STATE["score"] = 0
-    STATE["time_left"] = GAME_SECONDS
+    STATE["game_seconds"] = _round_length()      # the "Game time" slider, read when a round is built
+    STATE["time_left"] = STATE["game_seconds"]
     STATE["banner"] = None
     STATE["revert"] = False
     if RANDOM_SEED is not None:
@@ -1132,7 +1138,7 @@ def tick():
 
     playing = STATE["phase"] == "playing"
     if playing:
-        # Never step past the end of the round, so it lasts exactly GAME_SECONDS.
+        # Never step past the end of the round, so it lasts exactly as long as the slider said.
         dt = min(dt, STATE["time_left"])
 
     counts = None
@@ -1171,25 +1177,49 @@ def _end_game():
     _refresh_start_button()
 
 
+def _round_length():
+    """Seconds per round: whatever the 'Game time' slider says (or the default before the window exists)."""
+    if cmds.floatSliderGrp(GAME_SLIDER, exists=True):
+        seconds = cmds.floatSliderGrp(GAME_SLIDER, query=True, value=True)
+    else:
+        seconds = GAME_SECONDS
+    return max(seconds, 1.0)
+
+
+def on_game_time_changed(*args):
+    """The 'Game time' slider moved. It sets the length of the NEXT round.
+
+    On the "Press Start Game" screen the banner shows the new length right away.
+    A round that is already running keeps the time it started with, and the
+    results screen is left alone.
+    """
+    if STATE["phase"] == "ready":
+        STATE["game_seconds"] = _round_length()
+        STATE["time_left"] = STATE["game_seconds"]
+        _update_banner()
+
+
 def _update_banner():
     """Show the countdown and score (or the final result) in the big banner."""
     phase = STATE["phase"]
+    total = STATE["game_seconds"]
 
     if phase == "ready":
-        text = "Press Start Game!     ({:g} seconds)".format(GAME_SECONDS)
+        text = "Press Start Game!     ({:g} seconds)".format(total)
         color, percent = BANNER_COLORS["ready"], 100
     elif phase == "playing":
         left = STATE["time_left"]
         text = "Time left: {}       Flowers collected: {}".format(
             _format_clock(left), STATE["score"]
         )
-        if left <= DANGER_SECONDS:
+        # (short rounds get proportionally shorter warnings: a third and a ninth of the round)
+        if left <= min(DANGER_SECONDS, total / 9.0):
             color = BANNER_COLORS["danger"]
-        elif left <= WARN_SECONDS:
+        elif left <= min(WARN_SECONDS, total / 3.0):
             color = BANNER_COLORS["warn"]
         else:
             color = BANNER_COLORS["playing"]
-        percent = int(round(100 * left / GAME_SECONDS))
+        percent = int(round(100 * left / total))
     else:
         text = "TIME'S UP!       Flowers collected: {}".format(STATE["score"])
         color, percent = BANNER_COLORS["over"], 0
@@ -1382,8 +1412,12 @@ def _make_position_slider(control_name, label, start_value):
     )
 
 
-def _make_time_slider(control_name, label, start_value, min_value, max_value):
-    """Helper for the 'how many seconds' sliders."""
+def _make_time_slider(control_name, label, start_value, min_value, max_value, command=None):
+    """Helper for the 'how many seconds' sliders (command runs when the value changes)."""
+    options = {}
+    if command is not None:
+        options["dragCommand"] = command
+        options["changeCommand"] = command
     return cmds.floatSliderGrp(
         control_name,
         label=label,
@@ -1396,6 +1430,7 @@ def _make_time_slider(control_name, label, start_value, min_value, max_value):
         step=0.5,
         precision=1,
         columnWidth3=(90, 70, 200),
+        **options
     )
 
 
@@ -1488,6 +1523,15 @@ def show_cloud_gui():
     _make_position_slider(SLIDER_X, "Left / Right", sx)
     _make_position_slider(SLIDER_Z, "Forward / Back", sz)
 
+    # --- Game ---
+    cmds.separator(height=6, style="in")
+    cmds.text(label="Game", align="left", font="boldLabelFont")
+    _make_time_slider(
+        GAME_SLIDER, "Game time (s)", GAME_SECONDS, MIN_GAME_SECONDS, MAX_GAME_SECONDS,
+        command=on_game_time_changed,
+    )
+    cmds.text(label="The game time is used when you press Start Game.", align="left")
+
     # --- Weather and life cycle ---
     cmds.separator(height=6, style="in")
     cmds.text(label="Weather and life cycle", align="left", font="boldLabelFont")
@@ -1510,6 +1554,7 @@ def show_cloud_gui():
     _refresh_rain_button()
     _refresh_start_button()
     _show_garden_status()
+    on_game_time_changed()               # make the banner match the new slider
     _update_banner()
 
     # Ask Maya to call tick() every time it is idle. "parent=WINDOW_ID" ties the
