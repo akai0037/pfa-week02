@@ -1,1 +1,5 @@
 # pfa-week02
+For this project, I created a small game in Maya using Python with the help of Claude Code. The player controls a cloud to change the weather and help different flowers grow. Each flower has a different need: some flowers need sunlight and will stop growing if the cloud covers them, while other flowers need rain to grow. The goal is to help as many flowers bloom as possible within a limited amount of time.
+At first, I made sure that the cloud could move and the flowers could grow. However, I felt that the project was too simple and not very interesting. So I gradually added more ideas, such as flowers with different needs and flowers that can wither if they do not get the right conditions. I decided to turn the project into a simple game to make it more interactive and fun. I developed the final idea step by step by talking with Claude and adding new requirements based on what I wanted the game to do.
+
+Recording: https://drive.google.com/file/d/1JF1k3HSLtbv8RgyruyxKKBtIrp-6TmVC/view?usp=sharing
